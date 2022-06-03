@@ -1,11 +1,11 @@
-#include "Render.h"
+﻿#include "Render.h"
 
 void RenderSys::Initialize(HWND& hWnd)
 {
 	RECT rc;
 	GetClientRect(hWnd, &rc);
 	width = rc.right - rc.left; height = rc.bottom - rc.top;
-	m_camera = std::make_unique<Camera>(DirectX::XMFLOAT3( 1.5, 1.5 , 0 ), DirectX::XMFLOAT3(0, 0, 0));
+	mCamera = std::make_unique<Camera>(DirectX::XMFLOAT3( 1.5, 1.5 , 0 ), DirectX::XMFLOAT3(0, 0, 0));
 	bVSync = true;
 	bTearingSupported = CheckTearingSupport();
 
@@ -21,7 +21,7 @@ void RenderSys::Initialize(HWND& hWnd)
 	
 	CreateDepthStencil();
 	CreateRootSignatue();
-	CreatePSO();
+	CreatePSOs();
 
 	CreateSwapChain(hWnd, width, height, g_numFrames);
 	pRTVDescHeap.Swap(CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, g_numFrames));
@@ -40,6 +40,14 @@ void RenderSys::Initialize(HWND& hWnd)
 	m_scissorRect = CD3DX12_RECT(0, 0, static_cast<LONG>(width), static_cast<LONG>(height));
 
 	CreateConstantBuffers();
+	mShadowMap = std::make_unique<ShadowMap>(pDevice, width, height);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE hSRV = CD3DX12_CPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
+	hSRV.Offset(2, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	CD3DX12_CPU_DESCRIPTOR_HANDLE hDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(mDSDescHeap->GetCPUDescriptorHandleForHeapStart());
+	hDSV.Offset(1, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV));
+	CD3DX12_GPU_DESCRIPTOR_HANDLE hGPU_SRV = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
+	hGPU_SRV.Offset(2, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	mShadowMap->SetDescriptors(hSRV, hGPU_SRV, hDSV);
 }
 
 void RenderSys::Render()
@@ -49,22 +57,25 @@ void RenderSys::Render()
 	auto backBuffer = pBackBuffer[uCurrentBackBufferIndex];
 
 	commandAllocator->Reset();
-	pGCL->Reset(commandAllocator.Get(), pPSO.Get());
+	pGCL->Reset(commandAllocator.Get(), mPSOs["shadows"].Get());
 	//Set state
 	{
-		pGCL->SetGraphicsRootSignature(pRootSignature.Get());
+
 		ID3D12DescriptorHeap* ppHeaps[] = { pCBDescHeap.Get() };
 		pGCL->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-
+		
 		auto cbvFrameHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
 		cbvFrameHandle.Offset(m_desricptorHandleOffset);
+
+		DrawSceneToShdowMap();
+		pGCL->SetPipelineState(mPSOs["shadows"].Get());
+		pGCL->SetGraphicsRootSignature(mRSs["shadows"].Get());
 		pGCL->SetGraphicsRootDescriptorTable(0, pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
 		pGCL->SetGraphicsRootDescriptorTable(1, cbvFrameHandle);
+		pGCL->SetGraphicsRootDescriptorTable(2, mShadowMap->Srv());
 
 		pGCL->RSSetViewports(1, &m_viewport); 
 		pGCL->RSSetScissorRects(1, &m_scissorRect);
-
-
 	}
 
 	// Draw
@@ -72,21 +83,23 @@ void RenderSys::Render()
 		CD3DX12_RESOURCE_BARRIER  barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			backBuffer.Get(),
 			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		
+
+		m_frameCB.SetCameraPosition(mCamera->GetEyePosition());
+		m_modelCB.SetViewMatrix(mCamera->GetViewMatrix());
 		pGCL->ResourceBarrier(1, &barrier);
 		FLOAT clearColor[] = { 0.4f, 0.6f, 0.9f, 1.0f };
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(pRTVDescHeap->GetCPUDescriptorHandleForHeapStart(),
 			uCurrentBackBufferIndex, uRTVDescriptorSize);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_DSDescHeap->GetCPUDescriptorHandleForHeapStart()); 
+		CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(mDSDescHeap->GetCPUDescriptorHandleForHeapStart()); 
 		pGCL->OMSetRenderTargets(1, &rtv, FALSE, &dsvHandle);
 		pGCL->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
-		pGCL->ClearDepthStencilView(m_DSDescHeap->GetCPUDescriptorHandleForHeapStart(), D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
+		pGCL->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
 		pGCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
 		{
+			m_modelCB.SetModelMatrix((*it)->GetModelMatrix());
 			(*it)->SetVertexIndexBufferView(pGCL);
 			(*it)->DrawIndexed(pGCL);
 		}
@@ -245,13 +258,14 @@ void RenderSys::CreateSwapChain(HWND hWnd, uint32_t width, uint32_t height, uint
 	ThrowIfFailed(swapChain1.As(&pSwapChain));
 }
 
-ComPtr<ID3D12DescriptorHeap> RenderSys::CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors)
+ComPtr<ID3D12DescriptorHeap> RenderSys::CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS _flag)
 {
 	ComPtr<ID3D12DescriptorHeap> descriptorHeap;
 
 	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 	desc.NumDescriptors = numDescriptors;
 	desc.Type = type;
+	desc.Flags = _flag;
 
 	ThrowIfFailed(pDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&descriptorHeap)));
 
@@ -268,7 +282,7 @@ ComPtr<ID3D12CommandAllocator> RenderSys::CreateCommandAllocator(D3D12_COMMAND_L
 ComPtr<ID3D12GraphicsCommandList> RenderSys::CreateCommandList(ComPtr<ID3D12CommandAllocator> commandAllocator, D3D12_COMMAND_LIST_TYPE type)
 {
 	ComPtr<ID3D12GraphicsCommandList> commandList;
-	ThrowIfFailed(pDevice->CreateCommandList(0, type, commandAllocator.Get(), pPSO.Get(), IID_PPV_ARGS(&commandList)), 
+	ThrowIfFailed(pDevice->CreateCommandList(0, type, commandAllocator.Get(), mPSOs["shadows"].Get(), IID_PPV_ARGS(&commandList)),
 		"Cannt create command List!\n");
 	ThrowIfFailed(commandList->Close(), "Cannt close command List!\n");
 	return commandList;
@@ -313,7 +327,6 @@ uint64_t RenderSys::Signal(ComPtr<ID3D12CommandQueue> commandQueue, ComPtr<ID3D1
 	return fenceValueForSignal;
 }
 
-
 void RenderSys::WaitForFenceValue(ComPtr<ID3D12Fence> fence, uint64_t fenceValue, HANDLE fenceEvent,
 	std::chrono::milliseconds duration)
 {
@@ -332,35 +345,63 @@ void RenderSys::Flush()
 
 void RenderSys::CreateRootSignatue()
 {
-	CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
-	CD3DX12_ROOT_PARAMETER1 rootParameters[2];
-	ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
-	ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1);
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
+		CD3DX12_ROOT_PARAMETER1 rootParameters[3];
+		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+		ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1);
+		ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
 
-	rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
-	rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
-	D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
-		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
-		D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
-		D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-		D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+		rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
+		rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
+		D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
-	D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = {};
-	featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = {};
+		featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
 
-	CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
-	rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
+		const CD3DX12_STATIC_SAMPLER_DESC samplerState(0, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+			D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, 0.f, 16, D3D12_COMPARISON_FUNC_LESS_EQUAL, D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK);
 
-	ComPtr<ID3DBlob> signature;
-	ComPtr<ID3DBlob> error;
-	ThrowIfFailed(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error));
-	ThrowIfFailed(pDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&pRootSignature)));
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+		rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 1, &samplerState, rootSignatureFlags);
+
+		ComPtr<ID3DBlob> signature;
+		ComPtr<ID3DBlob> error;
+		ThrowIfFailed(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error));
+		ThrowIfFailed(pDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&mRSs["shadows"])));
+	}
+	{
+		CD3DX12_DESCRIPTOR_RANGE1 ranges[1];
+		CD3DX12_ROOT_PARAMETER1 rootParameters[1];
+		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+
+		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+		D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+			D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
+
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = {};
+		featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1;
+
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
+		rootSignatureDesc.Init_1_1(_countof(rootParameters), rootParameters, 0, nullptr, rootSignatureFlags);
+
+		ComPtr<ID3DBlob> signature;
+		ComPtr<ID3DBlob> error;
+		ThrowIfFailed(D3DX12SerializeVersionedRootSignature(&rootSignatureDesc, featureData.HighestVersion, &signature, &error));
+		ThrowIfFailed(pDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&mRSs["zTest"])));
+	}
 }
 
-void RenderSys::CreatePSO()
+void RenderSys::CreatePSOs()
 {
-	ComPtr<ID3DBlob> vertexShader;
-	ComPtr<ID3DBlob> pixelShader;
 
 #if defined(_DEBUG)
 	// Enable better shader debugging with the graphics debugging tools.
@@ -369,30 +410,53 @@ void RenderSys::CreatePSO()
 	UINT compileFlags = 0;
 #endif
 
-	ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsVS.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vertexShader, nullptr), "Cann't compile VS!\n");
-	ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsPS.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &pixelShader, nullptr), "Cann't compile PS!\n");
-
 	D3D12_INPUT_ELEMENT_DESC ia_desc[] = { 
 		{"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
+	{
+		ComPtr<ID3DBlob> vertexShader;
+		ComPtr<ID3DBlob> pixelShader;
+		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsVS.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vertexShader, nullptr), "Cann't compile VS!\n");
+		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsPS.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &pixelShader, nullptr), "Cann't compile PS!\n");
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-	psoDesc.InputLayout = { ia_desc, _countof(ia_desc) };
-	psoDesc.pRootSignature = pRootSignature.Get();
-	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
-	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	psoDesc.SampleMask = UINT_MAX;
-	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	psoDesc.NumRenderTargets = 1;
-	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-	psoDesc.SampleDesc.Count = 1;
-	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-	ThrowIfFailed(pDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pPSO)), "Cannot create PSO!");
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+		psoDesc.InputLayout = { ia_desc, _countof(ia_desc) };
+		psoDesc.pRootSignature = mRSs["shadows"].Get();
+		psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
+		psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
+		psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+		psoDesc.SampleMask = UINT_MAX;
+		psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		psoDesc.NumRenderTargets = 1;
+		psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+		psoDesc.SampleDesc.Count = 1;
+		psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		ThrowIfFailed(pDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&mPSOs["shadows"])), "Cannot create PSO!");
+	}
+	{
+		ComPtr<ID3DBlob> zTestShader;
+		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ZTest.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &zTestShader, nullptr), "Cann't compile ZTest shader!\n");
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoZDesc = {};
+		psoZDesc.InputLayout = { ia_desc, _countof(ia_desc) };
+		psoZDesc.pRootSignature = mRSs["zTest"].Get();
+		psoZDesc.VS = CD3DX12_SHADER_BYTECODE(zTestShader.Get());
+		//psoZDesc.PS = 
+		psoZDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		psoZDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		psoZDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+		psoZDesc.SampleMask = UINT_MAX;
+		psoZDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		psoZDesc.NumRenderTargets = 0;
+		psoZDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+		psoZDesc.SampleDesc.Count = 1;
+		psoZDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		ThrowIfFailed(pDevice->CreateGraphicsPipelineState(&psoZDesc, IID_PPV_ARGS(&mPSOs["zTest"])), "Cannot create PSO!");
+	}
 }
 
 RenderSys::~RenderSys()
@@ -420,7 +484,10 @@ void RenderSys::Update()
 	elapsedSeconds += deltaTime.count() * 1e-9;
 
 	float angle = DirectX::XM_2PI * static_cast<float>(elapsedSeconds) / 6;
-	m_modelCB.SetModelMatrix(DirectX::XMMatrixRotationY(angle));
+	static const float R = 2.;
+	static const float H = 1.5;
+	DirectX::XMFLOAT3 camPos = { sinf(angle) * R, H, cos(angle) * R };
+	mCamera->SetEyePosition(camPos);
 	if (elapsedSeconds >= 6)
 	{
 		elapsedSeconds = 0;
@@ -496,15 +563,45 @@ RenderSys::RenderSys()
 	height = 0;
 }
 
+void RenderSys::DrawSceneToShdowMap()
+{
+	pGCL->RSSetViewports(1, &mShadowMap->GetViewport());
+	pGCL->RSSetScissorRects(1, &mShadowMap->GetScissorRect());
+	pGCL->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->GetResource(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES));
 
+	pGCL->SetPipelineState(mPSOs["zTest"].Get());
+	pGCL->SetGraphicsRootSignature(mRSs["zTest"].Get());
+	pGCL->SetGraphicsRootDescriptorTable(0, pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
+
+	pGCL->ClearDepthStencilView(mShadowMap->Dsv(),
+		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+	pGCL->OMSetRenderTargets(0, nullptr, false, &mShadowMap->Dsv());
+
+	pGCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	DirectX::XMVECTOR eyePos = DirectX::XMLoadFloat3(&mLights[0].lightPos);
+	DirectX::XMVECTOR lookAt = DirectX::XMVectorSet(0, 0, 0, 0);
+	DirectX::XMVECTOR up = DirectX::XMVectorSet(0, 1, 0, 0);
+	m_modelCB.SetResources(DirectX::XMMatrixIdentity(), DirectX::XMMatrixLookAtLH(eyePos, lookAt, up),
+		mShadowMap->GetProjection());
+
+	for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
+	{
+		m_modelCB.SetModelMatrix((*it)->GetModelMatrix());
+		(*it)->SetVertexIndexBufferView(pGCL);
+		(*it)->DrawIndexed(pGCL);
+	}
+
+	pGCL->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->GetResource(),
+		D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ));
+
+}
+
+///@TODO Вынести матрицу проекции в класс
 void RenderSys::CreateConstantBuffers()
 {
-	D3D12_DESCRIPTOR_HEAP_DESC cbvHeapDesc = {};
-	cbvHeapDesc.NumDescriptors = 2;
-	cbvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	cbvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-
-	ThrowIfFailed(pDevice->CreateDescriptorHeap(&cbvHeapDesc, IID_PPV_ARGS(&pCBDescHeap)));
+	pCBDescHeap = CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 3, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
 	//ModelCB
 	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
@@ -514,25 +611,29 @@ void RenderSys::CreateConstantBuffers()
 	handle.Offset(m_desricptorHandleOffset);
 	float aspectRatio = (float)width / height;
 	DirectX::XMMATRIX projection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, aspectRatio, 0.1f, 100.f);
-	m_modelCB.SetResources(DirectX::XMMatrixIdentity(), m_camera->GetViewMatrix(), projection);
+	m_modelCB.SetResources(DirectX::XMMatrixIdentity(), mCamera->GetViewMatrix(), projection);
 	//FrameCB
 	m_frameCB.Initialize(pDevice, handle);
-	Light ll;
-	ll.color_ambient = {0.1, 0.1, 0.1, 0.1};
-	ll.lightPos = { 0, 1, 0 };
-	ll.light_color = {1, 1, 1, 1};
-	ll.range = 3.;
-	m_frameCB.SetResources(ll, m_camera->GetEyePosition());
+	
+	mLights[0].color_ambient = {0.1, 0.1, 0.1, 0.1};
+	mLights[0].lightPos = { 1, 1, 0 };
+	mLights[0].light_color = {1, 1, 1, 1};
+	mLights[0].range = 3.;
+	mLights[0].light_view = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mLights[0].lightPos), DirectX::XMVectorSet(0, 0, 0, 0),
+		DirectX::XMVectorSet(0, 1, 0, 0));
+	mLights[0].light_view = DirectX::XMMatrixTranspose(mLights[0].light_view);
+	mLights[0].light_projection = DirectX::XMMatrixTranspose(projection);
+	m_frameCB.SetResources(mLights[0], mCamera->GetEyePosition());
 }
 
 void RenderSys::CreateDepthStencil()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-	desc.NumDescriptors = 1;
+	desc.NumDescriptors = 2;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
-	ThrowIfFailed(pDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_DSDescHeap)));
+	ThrowIfFailed(pDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&mDSDescHeap)));
 
 	D3D12_DEPTH_STENCIL_VIEW_DESC depthStencilDesc = {};
 	depthStencilDesc.Format = DXGI_FORMAT_D32_FLOAT;
@@ -553,7 +654,7 @@ void RenderSys::CreateDepthStencil()
 		IID_PPV_ARGS(&m_depthStencilBuffer)
 	);
 
-	pDevice->CreateDepthStencilView(m_depthStencilBuffer.Get(), &depthStencilDesc, m_DSDescHeap->GetCPUDescriptorHandleForHeapStart());
+	pDevice->CreateDepthStencilView(m_depthStencilBuffer.Get(), &depthStencilDesc, mDSDescHeap->GetCPUDescriptorHandleForHeapStart());
 }
 
 DirectX::XMVECTOR calcTriangleNormal(const Vertex& _vt1, const Vertex& _vt2, const Vertex& _vt3)

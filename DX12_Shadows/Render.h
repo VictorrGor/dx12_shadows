@@ -6,12 +6,13 @@
 #include <wrl.h>
 #include <chrono>
 #include <d3dcompiler.h>
+#include <unordered_map>
 
 #include "Helpers.h"
 #include "Entity.h"
 #include "ConstantBuffer.h"
 #include "Camera.h"
-
+#include "ShadowMap.h"
 const UINT g_numFrames = 3;
 using Microsoft::WRL::ComPtr;
 
@@ -43,12 +44,12 @@ class RenderSys final
 	ComPtr<IDXGISwapChain4> pSwapChain;
 	ComPtr<ID3D12Resource> pBackBuffer[g_numFrames];
 	
-	ComPtr<ID3D12RootSignature> pRootSignature;
-	ComPtr<ID3D12PipelineState> pPSO;
+	std::unordered_map<std::string, ComPtr<ID3D12RootSignature>> mRSs;
+	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> mPSOs;
 
 	ComPtr<ID3D12DescriptorHeap> pCBDescHeap;
 	ComPtr<ID3D12DescriptorHeap> pRTVDescHeap;
-	ComPtr<ID3D12DescriptorHeap> m_DSDescHeap;
+	ComPtr<ID3D12DescriptorHeap> mDSDescHeap;
 	UINT uRTVDescriptorSize;
 	UINT uCurrentBackBufferIndex;
 
@@ -59,17 +60,26 @@ class RenderSys final
 	uint64_t uFenceValue = 0;
 	uint64_t uFrameFenceValues[g_numFrames];
 	HANDLE hFenceEvent;
-
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> pDebugInterface;
 #endif
+	std::unique_ptr<ShadowMap> mShadowMap;
+	ModelCB m_modelCB;
+	FrameCB m_frameCB;
+
+	bool bVSync;
+	bool bTearingSupported;
+	UINT m_desricptorHandleOffset;
+
+	std::vector<Entity*> vObjects;
+	std::unique_ptr<Camera> mCamera;
 
 
 	ComPtr<IDXGIAdapter3> GetAdapter();
 	void CreateDevice(ComPtr<IDXGIAdapter3> adapter);
 	void CreateSwapChain(HWND hWnd, uint32_t width, uint32_t height, uint32_t bufferCount);
 	ComPtr<ID3D12CommandQueue> CreateCommandQueue(D3D12_COMMAND_LIST_TYPE type);
-	ComPtr<ID3D12DescriptorHeap> CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors);
+	ComPtr<ID3D12DescriptorHeap> CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS _flag = D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 	ComPtr<ID3D12CommandAllocator> CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE type);
 	ComPtr<ID3D12GraphicsCommandList> CreateCommandList(ComPtr<ID3D12CommandAllocator> commandAllocator, D3D12_COMMAND_LIST_TYPE type);
 	ComPtr<ID3D12Fence> CreateFence();
@@ -77,7 +87,7 @@ class RenderSys final
 	bool CheckTearingSupport();
 	void UpdateRenderTargetViews();
 	void CreateRootSignatue();
-	void CreatePSO();
+	void CreatePSOs();
 	void CreateConstantBuffers();
 	void CreateDepthStencil();
 
@@ -85,22 +95,11 @@ class RenderSys final
 	void WaitForFenceValue(ComPtr<ID3D12Fence> fence, uint64_t fenceValue, HANDLE fenceEvent, 
 		std::chrono::milliseconds duration = std::chrono::milliseconds::max());
 
-
 	Entity* CreateEntity(Vertex* _pVtx, UINT _uVertexCount, UINT* _pIndecies, UINT _uIndexCount);
 	void Update();
+	void DrawSceneToShdowMap();
 
-
-	ModelCB m_modelCB;
-	FrameCB m_frameCB;
-
-
-	bool bVSync;
-	bool bTearingSupported;
-	UINT m_desricptorHandleOffset;
-
-	std::vector<Entity*> vObjects;
-
-	std::unique_ptr<Camera> m_camera;
+	Light mLights[1];
 public:
 	RenderSys();
 	~RenderSys();

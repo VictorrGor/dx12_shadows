@@ -14,4 +14,5 @@ public:
 	Camera(DirectX::XMFLOAT3 _eye, DirectX::XMFLOAT3 _look_at, DirectX::XMFLOAT3 _up = { 0, 1, 0 });
 	const DirectX::XMMATRIX& GetViewMatrix() const;
 	const DirectX::XMFLOAT3& GetEyePosition() const;
+	void SetEyePosition(const DirectX::XMFLOAT3& _eye);
 };

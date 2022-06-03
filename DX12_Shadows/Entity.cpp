@@ -4,6 +4,7 @@ Entity::Entity()
 {
 	uVtxCount = 0;
 	uIndexCount = 0;
+	mModel = DirectX::XMMatrixIdentity();
 }
 
 
@@ -35,4 +36,14 @@ void Entity::DrawIndexed(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> _pGCL
 {
 	_pGCL->DrawIndexedInstanced(uIndexCount, 1, 0, 0, 0);
 	//_pGCL->DrawInstanced(uVtxCount, 1, 0, 0);
+}
+
+const DirectX::XMMATRIX& Entity::GetModelMatrix() const
+{
+	return mModel;
+}
+
+void Entity::SetModelMatrix(const DirectX::XMMATRIX& _model)
+{
+	mModel = _model;
 }

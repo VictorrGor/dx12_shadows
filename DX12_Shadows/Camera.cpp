@@ -19,3 +19,10 @@ const DirectX::XMFLOAT3& Camera::GetEyePosition() const
 {
 	return m_eye;
 }
+
+void Camera::SetEyePosition(const DirectX::XMFLOAT3& _eye)
+{
+	m_eye = _eye;
+	m_viewMx = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&m_eye),
+		DirectX::XMLoadFloat3(&m_look_at), DirectX::XMLoadFloat3(&m_up));
+}
