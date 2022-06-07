@@ -148,6 +148,7 @@
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="ConstantBuffer.cpp" />
     <ClCompile Include="Entity.cpp" />
+    <ClCompile Include="FrameResource.cpp" />
     <ClCompile Include="Helpers.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="Render.cpp" />
@@ -156,6 +157,7 @@
     <ClInclude Include="Camera.h" />
     <ClInclude Include="ConstantBuffer.h" />
     <ClInclude Include="Entity.h" />
+    <ClInclude Include="FrameResource.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="Light.h" />
     <ClInclude Include="Render.h" />

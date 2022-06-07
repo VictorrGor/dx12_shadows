@@ -1,28 +1,28 @@
 #include "Camera.h"
 
-Camera::Camera(DirectX::XMFLOAT3 _eye, DirectX::XMFLOAT3 _look_at, DirectX::XMFLOAT3 _up)
+Camera::Camera(DirectX::XMFLOAT3 _eye, DirectX::XMFLOAT3 _lookAt, DirectX::XMFLOAT3 _up)
 {
-	m_eye = _eye;
-	m_look_at = _look_at;
-	m_up = _up;
+	mEye = _eye;
+	mLookAt = _lookAt;
+	mUp = _up;
 
-	m_viewMx = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&m_eye),
-		DirectX::XMLoadFloat3(&m_look_at), DirectX::XMLoadFloat3(&m_up));
+	mViewMx = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mEye),
+		DirectX::XMLoadFloat3(&mLookAt), DirectX::XMLoadFloat3(&mUp));
 }
 
 const DirectX::XMMATRIX& Camera::GetViewMatrix() const
 {
-	return m_viewMx;
+	return mViewMx;
 }
 
 const DirectX::XMFLOAT3& Camera::GetEyePosition() const
 {
-	return m_eye;
+	return mEye;
 }
 
 void Camera::SetEyePosition(const DirectX::XMFLOAT3& _eye)
 {
-	m_eye = _eye;
-	m_viewMx = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&m_eye),
-		DirectX::XMLoadFloat3(&m_look_at), DirectX::XMLoadFloat3(&m_up));
+	mEye = _eye;
+	mViewMx = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mEye),
+		DirectX::XMLoadFloat3(&mLookAt), DirectX::XMLoadFloat3(&mUp));
 }

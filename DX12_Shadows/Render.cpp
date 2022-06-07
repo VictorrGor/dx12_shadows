@@ -18,7 +18,8 @@ void RenderSys::Initialize(HWND& hWnd)
 	CreateDevice(adapter);
 	pCQ = CreateCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT);
 	uRTVDescriptorSize = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	
+	mSRVDesricptorHandleOffset = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
 	CreateDepthStencil();
 	CreateRootSignatue();
 	CreatePSOs();
@@ -39,14 +40,17 @@ void RenderSys::Initialize(HWND& hWnd)
 	m_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 	m_scissorRect = CD3DX12_RECT(0, 0, static_cast<LONG>(width), static_cast<LONG>(height));
 
+	pCBDescHeap = CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 10, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+
+	CreateFrameResources();
 	CreateConstantBuffers();
 	mShadowMap = std::make_unique<ShadowMap>(pDevice, width, height);
 	CD3DX12_CPU_DESCRIPTOR_HANDLE hSRV = CD3DX12_CPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
-	hSRV.Offset(2, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	hSRV.Offset(6, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
 	CD3DX12_CPU_DESCRIPTOR_HANDLE hDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(mDSDescHeap->GetCPUDescriptorHandleForHeapStart());
 	hDSV.Offset(1, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV));
 	CD3DX12_GPU_DESCRIPTOR_HANDLE hGPU_SRV = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
-	hGPU_SRV.Offset(2, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	hGPU_SRV.Offset(6, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
 	mShadowMap->SetDescriptors(hSRV, hGPU_SRV, hDSV);
 }
 
@@ -63,15 +67,10 @@ void RenderSys::Render()
 
 		ID3D12DescriptorHeap* ppHeaps[] = { pCBDescHeap.Get() };
 		pGCL->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-		
-		auto cbvFrameHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
-		cbvFrameHandle.Offset(m_desricptorHandleOffset);
-
+	
 		DrawSceneToShdowMap();
 		pGCL->SetPipelineState(mPSOs["shadows"].Get());
 		pGCL->SetGraphicsRootSignature(mRSs["shadows"].Get());
-		pGCL->SetGraphicsRootDescriptorTable(0, pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
-		pGCL->SetGraphicsRootDescriptorTable(1, cbvFrameHandle);
 		pGCL->SetGraphicsRootDescriptorTable(2, mShadowMap->Srv());
 
 		pGCL->RSSetViewports(1, &m_viewport); 
@@ -84,8 +83,7 @@ void RenderSys::Render()
 			backBuffer.Get(),
 			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-		m_frameCB.SetCameraPosition(mCamera->GetEyePosition());
-		m_modelCB.SetViewMatrix(mCamera->GetViewMatrix());
+		//mFrameResources->mModelCB->SetViewMatrix(mCamera->GetViewMatrix());
 		pGCL->ResourceBarrier(1, &barrier);
 		FLOAT clearColor[] = { 0.4f, 0.6f, 0.9f, 1.0f };
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(pRTVDescHeap->GetCPUDescriptorHandleForHeapStart(),
@@ -97,9 +95,19 @@ void RenderSys::Render()
 		pGCL->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
 		pGCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+		auto CBHeadHandle = pCBDescHeap->GetGPUDescriptorHandleForHeapStart();
+		mFrameResources->mFrameCB->SetCameraPosition(mCamera->GetEyePosition(), uCurrentBackBufferIndex);
+		auto frameHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(CBHeadHandle, 4, mSRVDesricptorHandleOffset);
+		pGCL->SetGraphicsRootDescriptorTable(1, mFrameResources->mFrameCB->GetGPUDescriptorHandle(frameHandle, 1, uCurrentBackBufferIndex, mSRVDesricptorHandleOffset));
+
 		for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
 		{
-			m_modelCB.SetModelMatrix((*it)->GetModelMatrix());
+			auto handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
+			UINT handleOffset = uCurrentBackBufferIndex * 2 + (it - vObjects.begin());
+			handle.Offset(handleOffset, mSRVDesricptorHandleOffset);
+			mFrameResources->mModelCB->SetResources((*it)->GetModelMatrix(), mCamera->GetViewMatrix(), mProjection, handleOffset);
+			pGCL->SetGraphicsRootDescriptorTable(0, handle);
 			(*it)->SetVertexIndexBufferView(pGCL);
 			(*it)->DrawIndexed(pGCL);
 		}
@@ -557,6 +565,15 @@ void RenderSys::DrawObject(Vertex* _pVtx, const UINT& _uVertexCount, UINT* _pInd
 	vObjects.push_back(CreateEntity(_pVtx, _uVertexCount, _pIndices, _uIndicesCount));
 }
 
+void RenderSys::CreateFrameResources()
+{
+	UINT handleOffset = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE handle(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
+	UINT objectCount = 2;
+
+	mFrameResources = std::make_unique<FrameResource>(pDevice.Get(), g_numFrames, objectCount, handle);
+}
+
 RenderSys::RenderSys()
 {
 	width = 0;
@@ -572,7 +589,6 @@ void RenderSys::DrawSceneToShdowMap()
 
 	pGCL->SetPipelineState(mPSOs["zTest"].Get());
 	pGCL->SetGraphicsRootSignature(mRSs["zTest"].Get());
-	pGCL->SetGraphicsRootDescriptorTable(0, pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
 
 	pGCL->ClearDepthStencilView(mShadowMap->Dsv(),
 		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
@@ -583,12 +599,15 @@ void RenderSys::DrawSceneToShdowMap()
 	DirectX::XMVECTOR eyePos = DirectX::XMLoadFloat3(&mLights[0].lightPos);
 	DirectX::XMVECTOR lookAt = DirectX::XMVectorSet(0, 0, 0, 0);
 	DirectX::XMVECTOR up = DirectX::XMVectorSet(0, 1, 0, 0);
-	m_modelCB.SetResources(DirectX::XMMatrixIdentity(), DirectX::XMMatrixLookAtLH(eyePos, lookAt, up),
-		mShadowMap->GetProjection());
+	DirectX::XMMATRIX viewMx = DirectX::XMMatrixLookAtLH(eyePos, lookAt, up);
 
+	//UINT reverseIndex = uCurrentBackBufferIndex ? 0 : 1;
 	for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
 	{
-		m_modelCB.SetModelMatrix((*it)->GetModelMatrix());
+		UINT handleOffset = it - vObjects.begin() + uCurrentBackBufferIndex * vObjects.size();
+		auto handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart(), handleOffset, mSRVDesricptorHandleOffset);
+		pGCL->SetGraphicsRootDescriptorTable(0, handle);
+		mFrameResources->mModelCB->SetResources((*it)->GetModelMatrix(), viewMx, mShadowMap->GetProjection(), handleOffset);
 		(*it)->SetVertexIndexBufferView(pGCL);
 		(*it)->DrawIndexed(pGCL);
 	}
@@ -601,20 +620,11 @@ void RenderSys::DrawSceneToShdowMap()
 ///@TODO Вынести матрицу проекции в класс
 void RenderSys::CreateConstantBuffers()
 {
-	pCBDescHeap = CreateDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 3, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-
 	//ModelCB
-	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
-	m_modelCB.Initialize(pDevice, handle);
-	
-	m_desricptorHandleOffset = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	handle.Offset(m_desricptorHandleOffset);
 	float aspectRatio = (float)width / height;
-	DirectX::XMMATRIX projection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, aspectRatio, 0.1f, 100.f);
-	m_modelCB.SetResources(DirectX::XMMatrixIdentity(), mCamera->GetViewMatrix(), projection);
-	//FrameCB
-	m_frameCB.Initialize(pDevice, handle);
-	
+	mProjection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, aspectRatio, 0.1f, 100.f);
+	//mFrameResources->mModelCB->SetResources(DirectX::XMMatrixIdentity(), mCamera->GetViewMatrix(), projection);
+	//FrameCB	
 	mLights[0].color_ambient = {0.1, 0.1, 0.1, 0.1};
 	mLights[0].lightPos = { 1, 1, 0 };
 	mLights[0].light_color = {1, 1, 1, 1};
@@ -622,8 +632,9 @@ void RenderSys::CreateConstantBuffers()
 	mLights[0].light_view = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mLights[0].lightPos), DirectX::XMVectorSet(0, 0, 0, 0),
 		DirectX::XMVectorSet(0, 1, 0, 0));
 	mLights[0].light_view = DirectX::XMMatrixTranspose(mLights[0].light_view);
-	mLights[0].light_projection = DirectX::XMMatrixTranspose(projection);
-	m_frameCB.SetResources(mLights[0], mCamera->GetEyePosition());
+	mLights[0].light_projection = DirectX::XMMatrixTranspose(mProjection);
+	mFrameResources->mFrameCB->SetResources(mLights[0], mCamera->GetEyePosition(), 0);
+	mFrameResources->mFrameCB->SetResources(mLights[0], mCamera->GetEyePosition(), 1);
 }
 
 void RenderSys::CreateDepthStencil()

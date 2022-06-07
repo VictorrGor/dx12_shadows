@@ -31,6 +31,7 @@ static const float specFactor = 64;
 
 float4 main(PS_INPUT inp) : SV_TARGET
 {
+
 	float bias = 0.001f;
 	float4 lightSpacePos = mul(mul(inp.worldPos, ll.light_view), ll.light_projection);
 	float2 projTextureCoord;

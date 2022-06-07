@@ -13,7 +13,8 @@
 #include "ConstantBuffer.h"
 #include "Camera.h"
 #include "ShadowMap.h"
-const UINT g_numFrames = 3;
+#include "FrameResource.h"
+const UINT g_numFrames = 2;
 using Microsoft::WRL::ComPtr;
 
 
@@ -64,12 +65,14 @@ class RenderSys final
 	ComPtr<ID3D12Debug> pDebugInterface;
 #endif
 	std::unique_ptr<ShadowMap> mShadowMap;
-	ModelCB m_modelCB;
-	FrameCB m_frameCB;
+	//ModelCB m_modelCB;
+	//FrameCB m_frameCB;
+	std::unique_ptr<FrameResource> mFrameResources;
+	DirectX::XMMATRIX mProjection;
 
 	bool bVSync;
 	bool bTearingSupported;
-	UINT m_desricptorHandleOffset;
+	UINT mSRVDesricptorHandleOffset;
 
 	std::vector<Entity*> vObjects;
 	std::unique_ptr<Camera> mCamera;
@@ -90,6 +93,7 @@ class RenderSys final
 	void CreatePSOs();
 	void CreateConstantBuffers();
 	void CreateDepthStencil();
+	void CreateFrameResources();
 
 	uint64_t Signal(ComPtr<ID3D12CommandQueue> commandQueue, ComPtr<ID3D12Fence> fence, uint64_t& fenceValue);
 	void WaitForFenceValue(ComPtr<ID3D12Fence> fence, uint64_t fenceValue, HANDLE fenceEvent, 

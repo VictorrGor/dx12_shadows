@@ -5,13 +5,13 @@
 
 class Camera final
 {
-	DirectX::XMFLOAT3 m_eye;
-	DirectX::XMFLOAT3 m_look_at;
-	DirectX::XMFLOAT3 m_up;
+	DirectX::XMFLOAT3 mEye;
+	DirectX::XMFLOAT3 mLookAt;
+	DirectX::XMFLOAT3 mUp;
 
-	DirectX::XMMATRIX m_viewMx;
+	DirectX::XMMATRIX mViewMx;
 public:
-	Camera(DirectX::XMFLOAT3 _eye, DirectX::XMFLOAT3 _look_at, DirectX::XMFLOAT3 _up = { 0, 1, 0 });
+	Camera(DirectX::XMFLOAT3 _eye, DirectX::XMFLOAT3 _lookAt, DirectX::XMFLOAT3 _up = { 0, 1, 0 });
 	const DirectX::XMMATRIX& GetViewMatrix() const;
 	const DirectX::XMFLOAT3& GetEyePosition() const;
 	void SetEyePosition(const DirectX::XMFLOAT3& _eye);
