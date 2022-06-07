@@ -9,8 +9,9 @@
 struct FrameResource final
 {
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> mCommandAllocator;
-	std::unique_ptr<ModelCB> mModelCB;
-	std::unique_ptr<FrameCB> mFrameCB;
+	std::unique_ptr<ConstantBuffer<DirectX::XMMATRIX>> mModelCB;
+	std::unique_ptr<ConstantBuffer<CameraCBData>> mCameraCB;
+	std::unique_ptr<ConstantBuffer<FrameCBData>> mFrameCB;
 	UINT64 mFenceValue;
 
 	FrameResource(ID3D12Device* _device, UINT _frameBufferCount, UINT _objectsCount, D3D12_CPU_DESCRIPTOR_HANDLE _hSRV);

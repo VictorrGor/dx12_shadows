@@ -1,3 +1,37 @@
+
+cbuffer Camera: register(b0)
+{
+	float4x4 vp[4];
+};
+
+struct DrawConstants
+{
+	uint camNum;
+};
+ConstantBuffer<DrawConstants> actualCamera : register(b1);
+
+cbuffer Model: register(b2)
+{
+	float4x4 model;
+};
+
+
+struct LightPoint
+{
+	float4 light_color;
+	float4 color_ambient;
+	float3 lightPos;
+	float range;
+};
+
+cbuffer FrameCB: register(b3)
+{
+	LightPoint ll;
+	float3 cameraPos;
+};
+
+
+
 struct PS_INPUT
 {
 	float4 pos : SV_POSITION;
@@ -7,23 +41,6 @@ struct PS_INPUT
 };
 
 
-struct LightPoint
-{
-	float4x4 light_view;
-	float4x4 light_projection;
-	float4 light_color;
-	float4 color_ambient;
-	float3 lightPos;
-	float range;
-};
-
-cbuffer FrameCB: register(b1)
-{
-	LightPoint ll;
-	float3 cameraPos;
-	float padding[16]; 
-}
-
 Texture2D depthMap: register(t0);
 SamplerState ss: register(s0);
 
@@ -31,9 +48,9 @@ static const float specFactor = 64;
 
 float4 main(PS_INPUT inp) : SV_TARGET
 {
-
+	//return inp.color;
 	float bias = 0.001f;
-	float4 lightSpacePos = mul(mul(inp.worldPos, ll.light_view), ll.light_projection);
+	float4 lightSpacePos = mul(inp.worldPos, vp[1]);
 	float2 projTextureCoord;
 	projTextureCoord.x = (lightSpacePos.x / lightSpacePos.w) / 2.f + 0.5f;
 	projTextureCoord.y = -(lightSpacePos.y / lightSpacePos.w) / 2.f + 0.5f;

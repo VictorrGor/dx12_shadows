@@ -46,11 +46,11 @@ void RenderSys::Initialize(HWND& hWnd)
 	CreateConstantBuffers();
 	mShadowMap = std::make_unique<ShadowMap>(pDevice, width, height);
 	CD3DX12_CPU_DESCRIPTOR_HANDLE hSRV = CD3DX12_CPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetCPUDescriptorHandleForHeapStart());
-	hSRV.Offset(6, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	hSRV.Offset(8, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
 	CD3DX12_CPU_DESCRIPTOR_HANDLE hDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(mDSDescHeap->GetCPUDescriptorHandleForHeapStart());
 	hDSV.Offset(1, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV));
 	CD3DX12_GPU_DESCRIPTOR_HANDLE hGPU_SRV = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
-	hGPU_SRV.Offset(6, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	hGPU_SRV.Offset(8, pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
 	mShadowMap->SetDescriptors(hSRV, hGPU_SRV, hDSV);
 }
 
@@ -82,8 +82,7 @@ void RenderSys::Render()
 		CD3DX12_RESOURCE_BARRIER  barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			backBuffer.Get(),
 			D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-		//mFrameResources->mModelCB->SetViewMatrix(mCamera->GetViewMatrix());
+;
 		pGCL->ResourceBarrier(1, &barrier);
 		FLOAT clearColor[] = { 0.4f, 0.6f, 0.9f, 1.0f };
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(pRTVDescHeap->GetCPUDescriptorHandleForHeapStart(),
@@ -93,21 +92,29 @@ void RenderSys::Render()
 		pGCL->OMSetRenderTargets(1, &rtv, FALSE, &dsvHandle);
 		pGCL->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
 		pGCL->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
 		pGCL->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 		auto CBHeadHandle = pCBDescHeap->GetGPUDescriptorHandleForHeapStart();
-		mFrameResources->mFrameCB->SetCameraPosition(mCamera->GetEyePosition(), uCurrentBackBufferIndex);
-		auto frameHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(CBHeadHandle, 4, mSRVDesricptorHandleOffset);
-		pGCL->SetGraphicsRootDescriptorTable(1, mFrameResources->mFrameCB->GetGPUDescriptorHandle(frameHandle, 1, uCurrentBackBufferIndex, mSRVDesricptorHandleOffset));
+	///FrameCB
+		FrameCBData fData;
+		fData.mLL = mLights[0];
+		fData.mCameraPos = mCamera->GetEyePosition();
+		mFrameResources->mFrameCB->SetResources(fData, uCurrentBackBufferIndex);
+		auto frameHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(CBHeadHandle, 6 + uCurrentBackBufferIndex, mSRVDesricptorHandleOffset);
+		pGCL->SetGraphicsRootDescriptorTable(4, frameHandle);
+	///CameraCB
+		auto cameraHandle = CD3DX12_GPU_DESCRIPTOR_HANDLE(CBHeadHandle, 4 + uCurrentBackBufferIndex, mSRVDesricptorHandleOffset);
+		mCameraCB.mVPMx[0] = DirectX::XMMatrixTranspose(mCamera->GetViewMatrix() * mProjection);
+		mFrameResources->mCameraCB->SetResources(mCameraCB, uCurrentBackBufferIndex);
+		pGCL->SetGraphicsRootDescriptorTable(0, cameraHandle);
 
 		for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
 		{
 			auto handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart());
 			UINT handleOffset = uCurrentBackBufferIndex * 2 + (it - vObjects.begin());
 			handle.Offset(handleOffset, mSRVDesricptorHandleOffset);
-			mFrameResources->mModelCB->SetResources((*it)->GetModelMatrix(), mCamera->GetViewMatrix(), mProjection, handleOffset);
-			pGCL->SetGraphicsRootDescriptorTable(0, handle);
+			mFrameResources->mModelCB->SetResources(DirectX::XMMatrixTranspose((*it)->GetModelMatrix()), handleOffset);
+			pGCL->SetGraphicsRootDescriptorTable(1, handle);
 			(*it)->SetVertexIndexBufferView(pGCL);
 			(*it)->DrawIndexed(pGCL);
 		}
@@ -354,15 +361,18 @@ void RenderSys::Flush()
 void RenderSys::CreateRootSignatue()
 {
 	{
-		CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
-		CD3DX12_ROOT_PARAMETER1 rootParameters[3];
+		CD3DX12_DESCRIPTOR_RANGE1 ranges[4];
+		CD3DX12_ROOT_PARAMETER1 rootParameters[5];
 		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
-		ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 1);
+		ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2);
 		ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+		ranges[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 3);
 
-		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
-		rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_PIXEL);
-		rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
+		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_ALL);   //Camera
+		rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_VERTEX);//Model
+		rootParameters[2].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL); //ShadowMap
+		rootParameters[3].InitAsConstants(2, 1, 0, D3D12_SHADER_VISIBILITY_ALL);			   //Const
+		rootParameters[4].InitAsDescriptorTable(1, &ranges[3], D3D12_SHADER_VISIBILITY_PIXEL); //Frame
 		D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
 			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
 			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
@@ -384,11 +394,14 @@ void RenderSys::CreateRootSignatue()
 		ThrowIfFailed(pDevice->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&mRSs["shadows"])));
 	}
 	{
-		CD3DX12_DESCRIPTOR_RANGE1 ranges[1];
-		CD3DX12_ROOT_PARAMETER1 rootParameters[1];
+		CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
+		CD3DX12_ROOT_PARAMETER1 rootParameters[3];
 		ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
+		ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2);
 
 		rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_VERTEX);
+		rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_VERTEX);
+		rootParameters[2].InitAsConstants(2, 1, 0, D3D12_SHADER_VISIBILITY_VERTEX);
 		D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
 			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
 			D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
@@ -426,8 +439,10 @@ void RenderSys::CreatePSOs()
 	{
 		ComPtr<ID3DBlob> vertexShader;
 		ComPtr<ID3DBlob> pixelShader;
-		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsVS.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vertexShader, nullptr), "Cann't compile VS!\n");
-		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ShadowsPS.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &pixelShader, nullptr), "Cann't compile PS!\n");
+		ComPtr<ID3DBlob> error;
+
+		CompileShader(L"Shaders/ShadowsVS.hlsl", nullptr, nullptr, "main", "vs_5_1", compileFlags, 0, &vertexShader, &error);
+		CompileShader(L"Shaders/ShadowsPS.hlsl", nullptr, nullptr, "main", "ps_5_1", compileFlags, 0, &pixelShader, nullptr);
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
 		psoDesc.InputLayout = { ia_desc, _countof(ia_desc) };
@@ -447,7 +462,7 @@ void RenderSys::CreatePSOs()
 	}
 	{
 		ComPtr<ID3DBlob> zTestShader;
-		ThrowIfFailed(D3DCompileFromFile(L"Shaders/ZTest.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &zTestShader, nullptr), "Cann't compile ZTest shader!\n");
+		CompileShader(L"Shaders/ZTest.hlsl", nullptr, nullptr, "main", "vs_5_1", compileFlags, 0, &zTestShader, nullptr);
 
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoZDesc = {};
 		psoZDesc.InputLayout = { ia_desc, _countof(ia_desc) };
@@ -601,13 +616,18 @@ void RenderSys::DrawSceneToShdowMap()
 	DirectX::XMVECTOR up = DirectX::XMVectorSet(0, 1, 0, 0);
 	DirectX::XMMATRIX viewMx = DirectX::XMMatrixLookAtLH(eyePos, lookAt, up);
 
-	//UINT reverseIndex = uCurrentBackBufferIndex ? 0 : 1;
+	mCameraCB.mVPMx[1] = DirectX::XMMatrixTranspose(viewMx * mProjection);
+	mFrameResources->mCameraCB->SetResources(mCameraCB, uCurrentBackBufferIndex);
+	pGCL->SetGraphicsRootDescriptorTable(0, CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart(), 
+						4 + uCurrentBackBufferIndex, mSRVDesricptorHandleOffset));
+
+	//pGCL->SetGraphicsRoot32BitConstant(2, 1, 0);
 	for (auto it = vObjects.begin(); it != vObjects.end(); ++it)
 	{
 		UINT handleOffset = it - vObjects.begin() + uCurrentBackBufferIndex * vObjects.size();
 		auto handle = CD3DX12_GPU_DESCRIPTOR_HANDLE(pCBDescHeap->GetGPUDescriptorHandleForHeapStart(), handleOffset, mSRVDesricptorHandleOffset);
-		pGCL->SetGraphicsRootDescriptorTable(0, handle);
-		mFrameResources->mModelCB->SetResources((*it)->GetModelMatrix(), viewMx, mShadowMap->GetProjection(), handleOffset);
+		mFrameResources->mModelCB->SetResources(DirectX::XMMatrixTranspose((*it)->GetModelMatrix()), handleOffset);
+		pGCL->SetGraphicsRootDescriptorTable(1, handle);
 		(*it)->SetVertexIndexBufferView(pGCL);
 		(*it)->DrawIndexed(pGCL);
 	}
@@ -617,24 +637,31 @@ void RenderSys::DrawSceneToShdowMap()
 
 }
 
-///@TODO Вынести матрицу проекции в класс
 void RenderSys::CreateConstantBuffers()
 {
-	//ModelCB
 	float aspectRatio = (float)width / height;
 	mProjection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV2, aspectRatio, 0.1f, 100.f);
-	//mFrameResources->mModelCB->SetResources(DirectX::XMMatrixIdentity(), mCamera->GetViewMatrix(), projection);
+	
 	//FrameCB	
 	mLights[0].color_ambient = {0.1, 0.1, 0.1, 0.1};
 	mLights[0].lightPos = { 1, 1, 0 };
 	mLights[0].light_color = {1, 1, 1, 1};
-	mLights[0].range = 3.;
-	mLights[0].light_view = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mLights[0].lightPos), DirectX::XMVectorSet(0, 0, 0, 0),
+	mLights[0].range = 5.;
+
+	//CameraCB
+	CameraCBData cameraData;
+	DirectX::XMMATRIX light_view = DirectX::XMMatrixLookAtLH(DirectX::XMLoadFloat3(&mLights[0].lightPos), DirectX::XMVectorSet(0, 0, 0, 0),
 		DirectX::XMVectorSet(0, 1, 0, 0));
-	mLights[0].light_view = DirectX::XMMatrixTranspose(mLights[0].light_view);
-	mLights[0].light_projection = DirectX::XMMatrixTranspose(mProjection);
-	mFrameResources->mFrameCB->SetResources(mLights[0], mCamera->GetEyePosition(), 0);
-	mFrameResources->mFrameCB->SetResources(mLights[0], mCamera->GetEyePosition(), 1);
+	cameraData.mVPMx[0] = DirectX::XMMatrixTranspose(mCamera->GetViewMatrix() * mProjection);
+	cameraData.mVPMx[1] = DirectX::XMMatrixTranspose(light_view * mProjection);
+	mFrameResources->mCameraCB->SetResources(cameraData, 0);
+	mFrameResources->mCameraCB->SetResources(cameraData, 1);
+
+	FrameCBData frameData;
+	frameData.mLL = mLights[0];
+	frameData.mCameraPos = mCamera->GetEyePosition();
+	mFrameResources->mFrameCB->SetResources(frameData, 0);
+	mFrameResources->mFrameCB->SetResources(frameData, 1);
 }
 
 void RenderSys::CreateDepthStencil()

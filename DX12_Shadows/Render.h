@@ -104,6 +104,7 @@ class RenderSys final
 	void DrawSceneToShdowMap();
 
 	Light mLights[1];
+	CameraCBData mCameraCB;
 public:
 	RenderSys();
 	~RenderSys();
