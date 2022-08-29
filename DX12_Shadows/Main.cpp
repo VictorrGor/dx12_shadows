@@ -1,6 +1,8 @@
 #include <Windows.h>
+#include <windowsx.h>
 #include <iostream>
 #include <fstream>
+#include <mutex>
 
 #include "Render.h"
 class RenderSys;
@@ -152,7 +154,7 @@ void CubeScene()
 	rs.DrawObject(cube, ARRAYSIZE(cube), indices, ARRAYSIZE(indices));
 
 	Vertex plane[4];
-	float plane_size = 5.f;
+	float plane_size = 50.f;
 	plane[0].position = { -plane_size, -0.5, -plane_size };
 	plane[1].position = { -plane_size, -0.5, plane_size };
 	plane[2].position = { plane_size, -0.5, plane_size };
@@ -253,7 +255,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	HDC hDC;
 	PAINTSTRUCT ps;
 
-	static int wheel_dist = 1;
+	static int wheel_dist = 1; 
+	static std::once_flag onceFlag;
+	static int xPosMouse = 0;
+	static int yPosMouse = 0;
+	std::call_once(onceFlag, []() {POINT p; GetCursorPos(&p); xPosMouse = p.x; yPosMouse = p.y; });
 
 	switch (uMsg)
 	{
@@ -273,6 +279,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			PostQuitMessage(0);
 			break;
 		}
+		case WM_MOUSEMOVE:
+		{
+			int actualX = GET_X_LPARAM(lParam);
+			int actualY = GET_Y_LPARAM(lParam);
+
+			rs.RotateCamera(actualX - xPosMouse, actualY - yPosMouse);
+			xPosMouse = actualX;
+			yPosMouse = actualY;
+		}
 		case WM_KEYDOWN:
 		{
 			switch (wParam)
@@ -280,6 +295,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				case VK_ESCAPE:
 				{
 					DestroyWindow(hWnd);
+					break;
+				}
+				case VK_UP:
+				{
+					rs.MoveForward();
+					break;
+				}
+				case VK_DOWN:
+				{
+					rs.MoveBackward();
+					break;
+				}
+				case VK_LEFT:
+				{
+					rs.MoveLeft();
+					break;
+				}
+				case VK_RIGHT:
+				{
+					rs.MoveRight();
 					break;
 				}
 			}

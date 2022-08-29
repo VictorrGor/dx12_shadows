@@ -10,3 +10,6 @@ UINT CalcConstantBufferByteSize(UINT byteSize);
 
 void CompileShader(LPCWSTR pFileName, CONST D3D_SHADER_MACRO* pDefines, ID3DInclude* pInclude, 
 	LPCSTR pEntrypoint, LPCSTR pTarget, UINT Flags1, UINT Flags2, ID3DBlob** ppCode, ID3DBlob** ppErrorMsgs);
+
+
+void ThrowWithMessage(HRESULT _hRes, ID3DBlob* _errorMsg);

@@ -34,3 +34,13 @@ void CompileShader(LPCWSTR pFileName, const D3D_SHADER_MACRO* pDefines, ID3DIncl
 	}
 	ThrowIfFailed(hRes);
 }
+
+void ThrowWithMessage(HRESULT _hRes, ID3DBlob* _errorMsg)
+{
+	if (FAILED(_hRes) && _errorMsg)
+	{
+		const char* errorMsg = (const char*)(_errorMsg)->GetBufferPointer();
+		MessageBox(nullptr, errorMsg, "Shader Compilation Error", MB_RETRYCANCEL);
+		throw "Some error!";
+	}
+}
