@@ -3,7 +3,7 @@
 
 void buildCompactCluster(uint3 DTid : SV_DispatchThreadID)
 {
-	uint clusterID = DTid.x + DTid.y * clusterSize.x + DTid.z * clusterSize.x * clusterSize.y;
+	uint clusterID = DTid.x + DTid.y * dispatchSize.x + DTid.z * dispatchSize.x * dispatchSize.y;
 	if (activeClusters[clusterID])
 	{
 		uint offset = rwActiveClusterCounter.IncrementCounter();
