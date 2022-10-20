@@ -109,11 +109,22 @@
     <FxCompile Include="Shaders\DrawClustersVS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="BuildCompactCluster.hlsl">
+    <FxCompile Include="Shaders\BuildCompactCluster.hlsl">
       <Filter>Shaders\Compute</Filter>
     </FxCompile>
-    <FxCompile Include="BuildLIghtCluster.hlsl">
+    <FxCompile Include="Shaders\BuildLightCluster.hlsl">
       <Filter>Shaders\Compute</Filter>
     </FxCompile>
+    <FxCompile Include="Shaders\DeferredVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\ComputeHeader.hlsli">
+      <Filter>Shaders\Compute</Filter>
+    </None>
+    <None Include="Shaders\CommonDefenitions.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

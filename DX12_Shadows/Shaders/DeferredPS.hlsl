@@ -22,23 +22,23 @@ SamplerState ss : register(s0);
 
 cbuffer Camera : register(b0)
 {
-	float4x4 vp[12];//0 - camera matrix; 1 - inverse camera matrix; Other - lights
+	float4x4 vp[2 + ILIGHT_COUNT];//0 - camera matrix; 1 - inverse camera matrix; Other - lights
 };
 
 static const float specFactor = 128;
 
 cbuffer FrameBuffer : register(b1)
 {
-	LightPoint ll[10];
+	LightPoint ll[ILIGHT_COUNT];
 	float3 cameraPos;
+	uint numSlices;
 	float2 tileSize;
 	float2 zNearFar;
-	uint numSlices;
 	uint3 dispatchSize;
 };
 
-RWTexture2D<uint>			clusterNumLightPairs   : register(u0);
-RWTexture2D<uint>			clustersLightList	   : register(u1);
+RWTexture2D<uint> clusterNumLightPairs  : register(u0);
+RWTexture2D<uint> clustersLightList		: register(u1);
 
 float4 main(PS_INPUT inp) : SV_TARGET
 {
@@ -64,15 +64,15 @@ float4 main(PS_INPUT inp) : SV_TARGET
 
 		uint tileIndex = getClusterIndex(float3(projCoord, z), tileSize, numSlices, zNearFar, dispatchSize.xy);
 		uint arrayIndex = tileIndex * 2;
-		uint lightsCount = clusterNumLightPairs[float2(arrayIndex / 16384, arrayIndex % 16384)];
+		uint lightsCount = clusterNumLightPairs[float2(arrayIndex / 4096, arrayIndex % 4096)];
 		if (lightsCount)
 		{
 			arrayIndex = tileIndex * 2 + 1;
-			uint lightsOffset = clusterNumLightPairs[float2(arrayIndex / 16384, arrayIndex % 16384)];
+			uint lightsOffset = clusterNumLightPairs[float2(arrayIndex / 4096, arrayIndex % 4096)];
 			for (uint iLightCounter = 0; iLightCounter < lightsCount; ++iLightCounter)
 			{
 				arrayIndex = lightsOffset + iLightCounter;
-				uint iLight = clustersLightList[float2(arrayIndex / 16384, arrayIndex % 16384)];
+				uint iLight = clustersLightList[float2(arrayIndex / 4096, arrayIndex % 4096)];
 				float3 lightDir = ll[iLight].lightPos - worldPos.xyz;
 				float lightDist = length(lightDir);
 				if (lightDist <= ll[iLight].range)

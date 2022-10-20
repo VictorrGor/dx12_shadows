@@ -11,14 +11,16 @@
 
 struct ClusterGenData
 {
-	DirectX::XMFLOAT4 tileSize;
+	DirectX::XMFLOAT2 tileSize;
 	DirectX::XMMATRIX inverseProjection;
 	DirectX::XMUINT2 screenSize;
 	float zNear;
 	float zFar;
 	DirectX::XMUINT3 dispatchSize;
-};
+	UINT numSlices;
 
+	DirectX::XMMATRIX viewMx;
+};
 //class ClustersResources
 //{
 //

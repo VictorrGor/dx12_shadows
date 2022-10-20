@@ -34,9 +34,11 @@ bool testSphereAABBColision(uint iLight, uint iTile)
 {
 	float radius = lights[iLight].range;
 	float4 viewLightPos = mul(float4(lights[iLight].position, 1), viewMx);
-	float4 viewTileMin = mul(float4(outMinMaxPointClusters[iTile * 2], 1), viewMx);
-	float4 viewTileMax = mul(float4(outMinMaxPointClusters[iTile * 2 + 1], 1), viewMx);
-	return radius >= sqDistancePointAABB(viewLightPos.xyz / viewLightPos.w, viewTileMin.xyz / viewTileMin.w, viewTileMax.xyz / viewTileMax.w);
+	float4 viewTileMin = float4(outMinMaxPointClusters[iTile * 2], 1);//mul(float4(outMinMaxPointClusters[iTile * 2], 1), viewMx);
+	float4 viewTileMax = float4(outMinMaxPointClusters[iTile * 2 + 1], 1);//mul(float4(outMinMaxPointClusters[iTile * 2 + 1], 1), viewMx);
+	//float dist = sqDistancePointAABB(viewLightPos.xyz / viewLightPos.w, viewTileMin.xyz / viewTileMin.w, viewTileMax.xyz / viewTileMax.w);
+	float dist = sqDistancePointAABB(viewLightPos.xyz, viewTileMin.xyz, viewTileMax.xyz);
+	return radius * radius >= dist;
 }
 
 groupshared uint gClusterLightOffset;
@@ -44,7 +46,7 @@ groupshared uint gClusterLightOffset;
 [numthreads(1, 1, 1)]
 void main( uint3 DTid : SV_DispatchThreadID )
 {
-	uint compactOffset = DTid.x + DTid.y * dispatchSize.x + DTid.z * dispatchSize.x * dispatchSize.y;
+	uint compactOffset = DTid.x;
 	uint iTile = compactActiveClusters[compactOffset];
 
 	uint actualLight[ILIGHT_COUNT];
@@ -65,14 +67,14 @@ void main( uint3 DTid : SV_DispatchThreadID )
 		InterlockedAdd(gClusterLightOffset, counter, clusterLightOffset);
 
 		uint arrayIndex = iTile * 2;
-		clusterNumLightPairs[float2(arrayIndex / 16384, arrayIndex % 16384)] = counter;
+		clusterNumLightPairs[float2(arrayIndex / 4096, arrayIndex % 4096)] = counter;
 		arrayIndex = arrayIndex + 1;
-		clusterNumLightPairs[float2(arrayIndex / 16384, arrayIndex % 16384)] = clusterLightOffset;
+		clusterNumLightPairs[float2(arrayIndex / 4096, arrayIndex % 4096)] = clusterLightOffset;
 
 		for (uint iLight = 0; iLight < counter; ++iLight)
 		{
 			arrayIndex = (clusterLightOffset + iLight);
-			clustersLightList[float2(arrayIndex / 16384, arrayIndex % 16384)] = actualLight[iLight];
+			clustersLightList[float2(arrayIndex / 4096, arrayIndex % 4096)] = actualLight[iLight];
 		}
 	}
 }

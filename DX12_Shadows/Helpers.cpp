@@ -14,6 +14,7 @@ void ThrowIfFailed(HRESULT hRes, const char* errMsg)
 {
 	if (FAILED(hRes))
 	{
+		MessageBoxA(NULL, errMsg, "Error!", 0);
 		throw (errMsg);
 	}
 }

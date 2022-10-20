@@ -28,6 +28,10 @@ using Microsoft::WRL::ComPtr;
 #undef max
 #endif
 
+struct IndirectCommand
+{
+	D3D12_DISPATCH_ARGUMENTS dispacthArguments;
+};
 
 void calcWeightedNormals(Vertex* _vertices, UINT _vtxCount, const UINT* _indicies, UINT _idxCount);
 
@@ -57,22 +61,32 @@ class RenderSys final
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> mComputeGCL;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> mComputeCQ;
 	Microsoft::WRL::ComPtr<ID3D12Fence> mComputeFence;
-	const UINT mClusterCountX = 16;
-	const UINT mClusterCountY = 9;
-	const UINT mClusterCountZ = 10;
+	const UINT mClusterCountX = 1;//16;
+	const UINT mClusterCountY = 1;//9;
+	const UINT mClusterCountZ = 10;//10;
 	std::unique_ptr<Entity> mClusterEntity;
-
+	
 	uint64_t mComputeFenceValue = 0;
 	HANDLE mComputeFenceEvent;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> mOutMinMaxPointClusters;
-	//Microsoft::WRL::ComPtr<ID3D12Resource> mOutMaxPointClusters;
-	Microsoft::WRL::ComPtr<ID3D12Resource> mAllClustersPoint;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mActiveClusters;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mCompactClusters;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mRWActiveClusters;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mClusterNumLightPairs;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mClustersLightList;
+	
+	Microsoft::WRL::ComPtr<ID3D12CommandSignature> mCommandSignature;
+	Microsoft::WRL::ComPtr<ID3D12Resource> mCommandBufferUpload;
+	UINT mCommmandBufferSize;
 
-	std::unique_ptr<ConstantBuffer<ClusterGenData>> mClusterGenBuf;
-	std::unique_ptr<ConstantBuffer<DirectX::XMMATRIX>> mClusterDrawBuf;
+	std::unique_ptr<ConstantBuffer<ClusterGenData>> mClusterCSData;
+	std::unique_ptr<ConstantBuffer<FrameLights>> mClusterCSLights;
+
+	//std::unique_ptr<ConstantBuffer<DirectX::XMMATRIX>> mClusterDrawBuf;
 
 	ClusterGenData mGenData;
+	FrameCBData mFrameData;
 	//
 	ComPtr<ID3D12DescriptorHeap> mCBDescHeap;
 	ComPtr<ID3D12DescriptorHeap> mRTVDescHeap;
@@ -128,9 +142,11 @@ class RenderSys final
 	void CreateForwardCBDesriptorHeap();
 	void CreateDeferredCBDescriptionHead();
 	void CreateClusterShader();
+	void CreateIndirectStaff();
 	void InitilizeComputeShaderResources();
 	void ComputeClusters();
 	void CreateClusterEntity();
+	void BuildLightClusterList();
 
 	void CreateLights();
 
@@ -144,7 +160,7 @@ class RenderSys final
 	void GPass();
 	void DeferredShading();
 
-	Light mLights[10];
+	FrameLights mLights;
 	CameraCBData mCameraCB;
 	std::unique_ptr<Entity> mDefferedPassScreen;
 public:

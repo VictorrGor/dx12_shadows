@@ -15,8 +15,12 @@ struct CameraCBData
 
 struct FrameCBData
 {
-	Light mLL[10];
+	Light mLL[ILIGHT_COUNT];
 	DirectX::XMFLOAT3 mCameraPos;
+	UINT mNumSlices;
+	DirectX::XMFLOAT2 mTileSize;
+	DirectX::XMFLOAT2 mNearFar;
+	DirectX::XMUINT3 mDispatchSize;
 };
 
 template<typename TData>
